@@ -1,0 +1,9 @@
+export const APP_NAME = 'telepi'
+export const VERSION = '0.1.0'
+export const SITE_APPS = 'https://my.telegram.org/apps'
+export const INITIAL_HISTORY = 40
+export const OLDER_HISTORY = 30
+export const DIALOG_LIMIT = 100
+export const GROUP_WINDOW_MS = 5 * 60 * 1000
+export const TOAST_MS = 4000
+export const TYPING_MS = 6000

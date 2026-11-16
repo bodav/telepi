@@ -1,6 +1,6 @@
 {
   "name": "telepi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Telegram client for the terminal, built for people who live in their CLI",
   "type": "module",
   "bin": {

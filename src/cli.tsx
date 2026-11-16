@@ -1,4 +1,5 @@
 import type { TelegramClient } from '@mtcute/node'
+import { VERSION } from './core/constants.js'
 import { LOGO_LINES } from './core/logo.js'
 
 interface Args {
@@ -82,7 +83,7 @@ async function main(): Promise<void> {
   }
 
   if (args.version) {
-    process.stdout.write('telepi 0.1.0\n')
+    process.stdout.write(`telepi ${VERSION}\n`)
     return
   }
 

@@ -1,5 +1,7 @@
 # telepi
 
+[![Container image](https://github.com/bodav/telepi/actions/workflows/container.yml/badge.svg)](https://github.com/bodav/telepi/actions/workflows/container.yml)
+
 ```text
 ██████ ██████ ██     ██████ ████   ██████
   ██   ██     ██     ██     ██  ██   ██
@@ -82,17 +84,35 @@ telepi
 
 ## Docker
 
-Build the image:
+Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GitHub
+Container Registry by the `Container image` workflow whenever a version tag is
+pushed:
 
 ```bash
-docker build -t telepi .
+docker pull ghcr.io/bodav/telepi:latest
 ```
 
 Run it interactively — the named volume keeps your session and downloads:
 
 ```bash
-docker run --rm -it -e TERM=xterm-256color -e API_ID -e API_HASH -v telepi-config:/home/node/.config/telepi telepi
+docker run --rm -it -e TERM=xterm-256color -e API_ID -e API_HASH -v telepi-config:/home/node/.config/telepi ghcr.io/bodav/telepi:latest
 ```
+
+Version tags are published as `X.Y.Z`, `X.Y`, and `latest`, so use a tag such as
+`ghcr.io/bodav/telepi:0.1.0` to pin a release. The GHCR package must be public in
+the repository's package settings for anonymous pulls; if it is private, run
+`docker login ghcr.io` first with a token that has `read:packages`.
+
+Publish a new version by pushing a tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+To build the image locally instead, run `docker build -t telepi .` from the
+repository root and replace `ghcr.io/bodav/telepi:latest` with `telepi` in the
+commands below.
 
 `API_ID` and `API_HASH` are passed through from your shell; without them telepi
 asks for credentials inside the container, exactly like a local run. Scan the
@@ -102,7 +122,7 @@ container.
 To send files with `/attach`, mount a host directory as well:
 
 ```bash
-docker run --rm -it -e TERM=xterm-256color -e API_ID -e API_HASH -v telepi-config:/home/node/.config/telepi -v "$PWD:/files" telepi
+docker run --rm -it -e TERM=xterm-256color -e API_ID -e API_HASH -v telepi-config:/home/node/.config/telepi -v "$PWD:/files" ghcr.io/bodav/telepi:latest
 ```
 
 Then `/attach /files/photo.jpg` sends it from the mounted directory. Replace

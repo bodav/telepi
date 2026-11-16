@@ -15,6 +15,7 @@ export const ConfigSchema = z.object({
   lastChat: z.string().min(1).optional(),
   notifications: NotificationsSchema.default('bell'),
   theme: ThemeSchema.default('auto'),
+  showIds: z.boolean().default(false),
 })
 export type Config = z.infer<typeof ConfigSchema>
 

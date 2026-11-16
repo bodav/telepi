@@ -11,9 +11,15 @@ export interface MessageRowProps {
   view: ChatEventView
   theme: Theme
   compact?: boolean
+  showIds?: boolean
 }
 
-export function MessageRow({ view, theme, compact = false }: MessageRowProps): React.JSX.Element {
+export function MessageRow({
+  view,
+  theme,
+  compact = false,
+  showIds = false,
+}: MessageRowProps): React.JSX.Element {
   if (view.kind === 'service') {
     return (
       <Box marginTop={view.showHeader ? 1 : 0} paddingLeft={2}>
@@ -26,6 +32,7 @@ export function MessageRow({ view, theme, compact = false }: MessageRowProps): R
 
   const color = view.fromMe ? theme.me : peerColor(theme, view.senderId)
   const footer: string[] = []
+  if (showIds) footer.push(`#${view.id}`)
   if (view.edited) footer.push('edited')
   if (view.views !== null) footer.push(`${formatCount(view.views)} views`)
 

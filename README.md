@@ -161,28 +161,31 @@ login entirely.
 | `/help` | filterable command list |
 | `/chats [filter]` | chat picker overlay |
 | `/open <@user\|id\|link>` | open a chat |
-| `/bot` | list this chat's bot commands |
+| `/bot [command]` | list this chat's bot commands, or forward one (`/bot model`) |
 | `/close` | close the current chat |
 | `/older` | older messages in a scrollable pager |
+| `/jump <id>` | load a message and its context into the feed |
 | `/search [all] <query>` | search this chat, or all chats |
 | `/reply [id]` | reply to a message (defaults to the last one) |
 | `/edit <id> <text>` | edit your message |
 | `/delete <id...>` | delete messages |
 | `/copy [id]` | copy message text |
-| `/save <id> [path]` | download attachments |
+| `/save [id\|last] [path]` | download an attachment (defaults to the latest) |
+| `/view [id\|last]` | save an attachment and open it |
 | `/attach <path> [caption]` | send a photo, video or file from disk |
 | `/unread` | chats with unread messages |
 | `/login` | show the signed-in account |
 | `/me` | account details |
 | `/notify off\|bell\|macos` | notifications for other chats |
 | `/theme auto\|dark\|light\|mono` | colours |
+| `/ids [on\|off]` | show message ids in the feed |
 | `/clear` | clear screen and feed |
 | `/logout` | sign out (asks twice) |
 | `/quit` | leave |
 
 Aliases: `/ls` → chats, `/go` → open, `/del` → delete, `/download` → save,
-`/file` and `/upload` → attach, `/whoami` → me, `/bothelp` → bot, `/exit`,
-`/q` → quit.
+`/preview` and `/reveal` → view, `/file` and `/upload` → attach, `/goto` and
+`/show` → jump, `/whoami` → me, `/bothelp` → bot, `/exit`, `/q` → quit.
 
 `/attach` reads a file from disk: photos are sent as photos, videos stay
 videos, and everything else goes as a document. Quote paths that contain
@@ -191,10 +194,24 @@ directory, and add an optional caption in the same Telegram Markdown as normal
 messages. Attach while a reply is armed and the file is sent as that reply.
 Uploads show progress in the spinner.
 
+`/save` with no arguments saves the newest attachment in the loaded feed;
+`/save last ~/Downloads/` does the same with a destination. `/view` saves the
+attachment and opens it with your system's default application, which is handy
+for screenshots and generated images.
+
+`/ids on` adds a dim `#id` line to messages as they arrive, so you can tell
+`/jump` (or `/copy`, `/save`, `/delete`) exactly which message you mean.
+Existing terminal scrollback cannot change; `/jump <id>` reloads a message and
+a window around it into the feed, where `/copy`, `/reply`, `/save`, and
+`/delete` can act on it. Search results and `/older` entries work the same way,
+so old agent output is no longer a dead end.
+
 `/name` runs a telepi command when one matches, and is sent to the chat
 otherwise — so Telegram bot commands like `/start` work normally. `/name@bot`
 always goes to Telegram, and `//name` sends a literal `/name` without running a
-telepi command.
+telepi command. When a bot command has the same name as a telepi command,
+`/bot <command>` forwards it explicitly: `/bot help`, `/bot save`, or
+`/bot model openrouter/...`.
 
 The command palette also lists the current chat's bot commands, read from
 Telegram: `/start` for a private bot chat, `/command@bot` in groups. When a bot
@@ -283,6 +300,7 @@ QR codes come from `qr`; the session uses SQLite through `@mtcute/node`.
   navigation yet.
 - Messages already in terminal scrollback are immutable; an edit or delete of
   an old message prints a dim notification instead of rewriting history.
+  `/jump <id>` reloads a context window when you need to act on an old message.
 - A QR code for a long login token is roughly 40×40 cells. telepi warns when
   the terminal is too narrow; if the code looks cut off, maximise the window
   before scanning.

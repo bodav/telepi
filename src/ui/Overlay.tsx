@@ -1,16 +1,18 @@
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { ChatListItem } from '../telegram/chats.js'
+import type { ChatListItem, SearchHit } from '../telegram/chats.js'
 import type { ChatEventView } from '../telegram/message.js'
 import type { PaletteItem } from '../commands/types.js'
 import { formatClock } from '../core/time.js'
 import { padEndWidth, truncate } from '../core/text.js'
 import type { Theme } from './theme.js'
+import { peerColor } from './theme.js'
 import { MessageRow } from './MessageRow.js'
 
 export type OverlayState =
   | { kind: 'chats'; query: string; index: number; items: ChatListItem[]; loading: boolean }
   | { kind: 'help'; query: string; index: number; items: PaletteItem[] }
+  | { kind: 'search'; query: string; all: boolean; hits: SearchHit[]; index: number }
   | { kind: 'history'; items: ChatEventView[]; index: number; hasMore: boolean; visible: number }
 
 export interface OverlayProps {
@@ -18,6 +20,7 @@ export interface OverlayProps {
   theme: Theme
   columns: number
   rows: number
+  showIds?: boolean
 }
 
 function frame(children: React.ReactNode, theme: Theme): React.JSX.Element {
@@ -183,14 +186,80 @@ function HelpOverlay({
   )
 }
 
+function SearchOverlay({
+  overlay,
+  theme,
+  columns,
+  rows,
+}: {
+  overlay: Extract<OverlayState, { kind: 'search' }>
+  theme: Theme
+  columns: number
+  rows: number
+}): React.JSX.Element {
+  const items = overlay.hits
+  const index = Math.min(overlay.index, Math.max(0, items.length - 1))
+  const titleWidth = Math.min(20, Math.max(12, Math.floor(columns * 0.22)))
+  const textWidth = Math.max(16, columns - titleWidth - 24)
+  const visibleLimit = Math.max(3, rows - 10)
+  const start = Math.max(
+    0,
+    Math.min(index - Math.floor(visibleLimit / 2), Math.max(0, items.length - visibleLimit)),
+  )
+  const visibleItems = items.slice(start, start + visibleLimit)
+  const hiddenAbove = start
+  const hiddenBelow = Math.max(0, items.length - start - visibleItems.length)
+
+  return frame(
+    <>
+      <Text>
+        <Text bold color={theme.accent}>
+          {overlay.all ? 'global search' : 'search'}
+        </Text>
+        <Text dimColor>
+          {truncate(
+            ` · “${overlay.query}” · ${items.length} result${items.length === 1 ? '' : 's'}`,
+            columns - 22,
+          )}
+        </Text>
+      </Text>
+
+      {hiddenAbove > 0 && <Text dimColor>↑ {hiddenAbove} more</Text>}
+
+      {visibleItems.map((hit, offset) => {
+        const i = start + offset
+        const selected = i === index
+        return (
+          <Box key={`${hit.chatId}:${hit.message.id}`}>
+            <Text color={selected ? theme.accent : undefined}>{selected ? '❯ ' : '  '}</Text>
+            <Text dimColor>{formatClock(hit.message.date)} </Text>
+            <Text color={peerColor(theme, hit.message.senderId)}>
+              {padEndWidth(truncate(hit.chatTitle, titleWidth), titleWidth)}{' '}
+            </Text>
+            <Text>{truncate(hit.message.text || hit.message.media.join(' '), textWidth)}</Text>
+            <Text dimColor> #{hit.message.id}</Text>
+          </Box>
+        )
+      })}
+
+      {items.length === 0 && <Text dimColor>nothing matched</Text>}
+      {hiddenBelow > 0 && <Text dimColor>↓ {hiddenBelow} more</Text>}
+      <Text dimColor>{truncate('enter jump · ↑↓ move · esc close', columns - 4)}</Text>
+    </>,
+    theme,
+  )
+}
+
 function HistoryOverlay({
   overlay,
   theme,
   columns,
+  showIds,
 }: {
   overlay: Extract<OverlayState, { kind: 'history' }>
   theme: Theme
   columns: number
+  showIds: boolean
 }): React.JSX.Element {
   const start = Math.max(0, Math.min(overlay.index, Math.max(0, overlay.items.length - 1)))
   const slice = overlay.items.slice(start, start + overlay.visible)
@@ -214,7 +283,7 @@ function HistoryOverlay({
       {start > 0 && <Text dimColor>↑ {start} more above</Text>}
 
       {slice.map((view) => (
-        <MessageRow key={view.key} view={view} theme={theme} compact />
+        <MessageRow key={view.key} view={view} theme={theme} compact showIds={showIds} />
       ))}
 
       {start + slice.length < overlay.items.length && (
@@ -222,20 +291,28 @@ function HistoryOverlay({
       )}
 
       <Text dimColor>
-        {truncate('↑↓ line · PgUp/PgDn page · esc close · /older for another page', columns - 4)}
+        {truncate('↑↓ line · PgUp/PgDn page · /jump #id · esc close', columns - 4)}
       </Text>
     </Box>
   )
 }
 
-export function Overlay({ overlay, theme, columns, rows }: OverlayProps): React.JSX.Element {
+export function Overlay({
+  overlay,
+  theme,
+  columns,
+  rows,
+  showIds = false,
+}: OverlayProps): React.JSX.Element {
   switch (overlay.kind) {
     case 'chats':
       return <ChatsOverlay overlay={overlay} theme={theme} columns={columns} rows={rows} />
     case 'help':
       return <HelpOverlay overlay={overlay} theme={theme} columns={columns} rows={rows} />
+    case 'search':
+      return <SearchOverlay overlay={overlay} theme={theme} columns={columns} rows={rows} />
     case 'history':
-      return <HistoryOverlay overlay={overlay} theme={theme} columns={columns} />
+      return <HistoryOverlay overlay={overlay} theme={theme} columns={columns} showIds={showIds} />
     default:
       return <Text />
   }

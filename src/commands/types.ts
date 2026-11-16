@@ -15,6 +15,7 @@ export interface CommandContext {
   replyTo: MessageView | null
   notifications: Notifications
   theme: ThemeName
+  showIds: boolean
   downloadsDir: string
   commands: readonly Command[]
   botCommands: readonly BotCommand[]
@@ -26,19 +27,24 @@ export interface CommandContext {
   openOverlay(kind: OverlayKind, query?: string): void
   setReply(view: MessageView | null): void
   lastMessage(): MessageView | null
+  lastMediaMessage(): MessageView | null
   messageById(id: number): MessageView | null
+  jump(id: number): Promise<void>
 
   search(query: string, all: boolean): Promise<SearchHit[]>
   showSearch(query: string, all: boolean, hits: SearchHit[]): void
 
   copy(text: string): Promise<boolean>
   download(id: number, path?: string): Promise<string>
+  view(id: number): Promise<string>
   sendFile(path: string, caption?: string): Promise<void>
+  sendBotCommand(command: string, args?: string): Promise<void>
   edit(id: number, text: string): Promise<void>
   remove(ids: number[]): Promise<void>
 
   setNotify(value: Notifications): void
   setTheme(value: ThemeName): void
+  setShowIds(value: boolean): Promise<void>
   saveConfig(patch: Partial<Config>): Promise<void>
   reloadBotCommands(): Promise<readonly BotCommand[]>
 

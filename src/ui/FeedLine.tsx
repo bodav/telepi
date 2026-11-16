@@ -11,6 +11,7 @@ export interface FeedLineProps {
   entry: FeedEntry
   theme: Theme
   columns: number
+  showIds?: boolean
 }
 
 const TONE_SYMBOL: Record<string, string> = {
@@ -20,10 +21,10 @@ const TONE_SYMBOL: Record<string, string> = {
   error: '✕',
 }
 
-export function FeedLine({ entry, theme, columns }: FeedLineProps): React.JSX.Element {
+export function FeedLine({ entry, theme, columns, showIds = false }: FeedLineProps): React.JSX.Element {
   switch (entry.kind) {
     case 'message':
-      return <MessageRow view={entry.view} theme={theme} />
+      return <MessageRow view={entry.view} theme={theme} showIds={showIds} />
 
     case 'day':
       return (
@@ -93,7 +94,11 @@ export function FeedLine({ entry, theme, columns }: FeedLineProps): React.JSX.El
 
           {entry.hits.length === 0 && <Text dimColor>nothing matched</Text>}
           {entry.hits.length > 0 && (
-            <Text dimColor>open the chat and use /copy #id · /reply #id to use a result</Text>
+            <Text dimColor>
+              {entry.all
+                ? 'open that chat, then /jump #id · /copy #id · /save #id'
+                : 'use /jump #id to open a result · /copy #id · /save #id'}
+            </Text>
           )}
         </Box>
       )

@@ -21,6 +21,7 @@ describe('config', () => {
     const parsed = ConfigSchema.parse({})
     expect(parsed.notifications).toBe('bell')
     expect(parsed.theme).toBe('auto')
+    expect(parsed.showIds).toBe(false)
   })
 
   it('returns defaults when the file does not exist', async () => {

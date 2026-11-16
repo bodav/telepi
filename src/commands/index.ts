@@ -65,12 +65,25 @@ export const commands: readonly Command[] = [
   {
     name: 'bot',
     aliases: ['bothelp'],
-    description: "list this chat's bot commands",
+    args: '[command] [args]',
+    description: "list this chat's bot commands, or run one with /bot <command>",
     group: 'chat',
-    run: async (ctx) => {
+    run: async (ctx, args) => {
       const chat = ctx.chat
       if (!chat) {
         ctx.system('no chat is open — use /chats to pick one', 'warn')
+        return
+      }
+
+      const forward = args.trim()
+      if (forward) {
+        const match = /^\/?([a-zA-Z0-9_-]+)(?:\s+([\s\S]*))?$/.exec(forward)
+        if (!match) {
+          ctx.system('usage: /bot <command> [args]', 'warn')
+          return
+        }
+
+        await ctx.sendBotCommand(match[1]!, match[2])
         return
       }
 
@@ -230,20 +243,86 @@ export const commands: readonly Command[] = [
   {
     name: 'save',
     aliases: ['download'],
-    args: '<id> [path]',
-    description: 'save media from a message',
+    args: '[id|last] [path]',
+    description: 'save an attachment (defaults to the latest one)',
     group: 'messages',
     run: async (ctx, args) => {
       if (!needChat(ctx)) return
 
-      const match = /^(\d+)(?:\s+(.+))?$/.exec(args.trim())
-      if (!match) {
-        ctx.system('usage: /save <id> [path]', 'warn')
+      const text = args.trim()
+      let id: number
+      let path: string | undefined
+
+      if (text === '' || /^last(?:\s|$)/i.test(text)) {
+        const last = ctx.lastMediaMessage()
+        if (!last) {
+          ctx.system('no attachments in the loaded feed', 'warn')
+          return
+        }
+
+        id = last.id
+        path = text.replace(/^last\b/i, '').trim() || undefined
+      } else {
+        const match = /^(\d+)(?:\s+([\s\S]*))?$/.exec(text)
+        if (!match) {
+          ctx.system('usage: /save [id|last] [path]', 'warn')
+          return
+        }
+
+        id = Number(match[1])
+        path = match[2]
+      }
+
+      const saved = await ctx.download(id, path)
+      ctx.system(`saved to ${saved}`, 'ok')
+    },
+  },
+  {
+    name: 'view',
+    aliases: ['preview', 'reveal'],
+    args: '[id|last]',
+    description: 'save an attachment and open it',
+    group: 'messages',
+    run: async (ctx, args) => {
+      if (!needChat(ctx)) return
+
+      const text = args.trim()
+      let id: number
+
+      if (text === '' || /^last$/i.test(text)) {
+        const last = ctx.lastMediaMessage()
+        if (!last) {
+          ctx.system('no attachments in the loaded feed', 'warn')
+          return
+        }
+        id = last.id
+      } else if (/^\d+$/.test(text)) {
+        id = Number(text)
+      } else {
+        ctx.system('usage: /view [id|last]', 'warn')
         return
       }
 
-      const saved = await ctx.download(Number(match[1]), match[2])
-      ctx.system(`saved to ${saved}`, 'ok')
+      const file = await ctx.view(id)
+      ctx.system(`opened ${file}`, 'ok')
+    },
+  },
+  {
+    name: 'jump',
+    aliases: ['goto', 'show'],
+    args: '<id>',
+    description: 'load a message and its context into the feed',
+    group: 'messages',
+    run: async (ctx, args) => {
+      if (!needChat(ctx)) return
+
+      const id = Number(args.trim())
+      if (!Number.isInteger(id) || id <= 0) {
+        ctx.system('usage: /jump <id>', 'warn')
+        return
+      }
+
+      await ctx.jump(id)
     },
   },
   {
@@ -356,6 +435,26 @@ export const commands: readonly Command[] = [
       ctx.setTheme(mode)
       await ctx.saveConfig({ theme: mode })
       ctx.system(`theme set to ${mode}`, 'ok')
+    },
+  },
+  {
+    name: 'ids',
+    args: '[on|off]',
+    description: 'show message ids in the feed',
+    group: 'app',
+    run: async (ctx, args) => {
+      const mode = args.trim().toLowerCase()
+
+      let next = !ctx.showIds
+      if (mode === 'on') next = true
+      else if (mode === 'off') next = false
+      else if (mode !== '') {
+        ctx.system('usage: /ids [on|off]', 'warn')
+        return
+      }
+
+      await ctx.setShowIds(next)
+      ctx.system(`message ids ${next ? 'shown for new messages' : 'hidden'}`, 'ok')
     },
   },
   {

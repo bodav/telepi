@@ -13,15 +13,16 @@ import { buildViewEntries, nextId, ruleEntry, systemEntry } from '../chat/feed.j
 import { copyToClipboard } from '../core/clipboard.js'
 import type { Config, Notifications, ThemeName } from '../core/config.js'
 import { downloadsDir } from '../core/config.js'
-import { TYPING_MS, TOAST_MS } from '../core/constants.js'
+import { TYPING_MS, TOAST_MS, DIALOG_LIMIT, DIALOG_PAGE } from '../core/constants.js'
 import { describeError } from '../core/errors.js'
 import { desktopNotify, ringBell } from '../core/notify.js'
 import { openPath } from '../core/open.js'
+import { parsePeerRef } from '../core/peer-ref.js'
 import { displayWidth, graphemes, rankByFuzzy, truncate } from '../core/text.js'
 import { formatBytes, formatClock } from '../core/time.js'
 import type { ChatEventView, MessageView } from '../telegram/message.js'
 import { toMessageView, mediaFilename } from '../telegram/message.js'
-import type { ChatInfo, ChatListItem, MessagePair, SearchHit } from '../telegram/chats.js'
+import type { ChatInfo, ChatListItem, MessagePair, SearchCursor, SearchPage } from '../telegram/chats.js'
 import {
   chatInfo,
   listDialogs,
@@ -68,20 +69,6 @@ function parseMarkdown(text: string): InputText {
   } catch {
     return text
   }
-}
-
-function normalizeRef(input: string): string | number {
-  let ref = input.trim()
-  ref = ref.replace(/^https?:\/\/(?:t|telegram)\.me\//i, '')
-  ref = ref.replace(/^tg:\/\/resolve\?domain=/i, '')
-  ref = ref.replace(/^tg:\/\/user\?id=/i, '')
-  ref = ref.replace(/^@/, '')
-  ref = ref.replace(/[?#].*$/, '')
-  ref = ref.replace(/\/+$/, '')
-  ref = ref.split('/')[0] ?? ref
-
-  if (/^-?\d+$/.test(ref)) return Number(ref)
-  return ref
 }
 
 function mergePair(raw: Message, meId: number): MessagePair | null {
@@ -143,6 +130,26 @@ export function ChatScreen({
   const logoutArmed = useRef(0)
   const booted = useRef(false)
   const locallyRead = useRef(new Set<number>())
+  /** Unsent text per chat, so switching chats never eats a half-written message. */
+  const drafts = useRef(new Map<number, string>())
+  const inputRef = useRef('')
+  const markdownRef = useRef(config.markdown)
+  /** Muted dialogs: no bell and no desktop notification for those chats. */
+  const muted = useRef(new Map<number, boolean>())
+  const dialogLimit = useRef(DIALOG_LIMIT)
+  const overlayRef = useRef<OverlayState | null>(null)
+
+  useEffect(() => {
+    overlayRef.current = overlay
+  }, [overlay])
+
+  useEffect(() => {
+    inputRef.current = input
+  }, [input])
+
+  useEffect(() => {
+    markdownRef.current = config.markdown
+  }, [config.markdown])
 
   useEffect(() => {
     notificationsRef.current = notifications
@@ -283,29 +290,100 @@ export function ChatScreen({
   )
 
 
+  const jump = useCallback(
+    async (id: number): Promise<void> => {
+      const current = chatRef.current
+      if (!current) throw new Error('no chat is open')
+
+      setBusy(`jumping to #${id}…`)
+      setOverlay(null)
+
+      try {
+        const [target] = await tg.getMessages(current.id, [id])
+        if (!target) throw new Error(`message #${id} is not in this chat`)
+
+        const page = await tg.getHistory(current.id, {
+          offset: { id, date: Math.floor(target.date.getTime() / 1000) },
+          addOffset: -10,
+          limit: 21,
+        })
+
+        const messages = [...page].reverse()
+        if (!messages.some((message) => message.id === id)) messages.push(target)
+        messages.sort((a, b) => a.id - b.id)
+
+        const pairs = messages
+          .map((message) => mergePair(message, me.id))
+          .filter((pair): pair is MessagePair => pair !== null)
+
+        if (pairs.length === 0) throw new Error(`message #${id} has nothing to show`)
+
+        olderRef.current = page.next
+        messageIndex.current.clear()
+        rawIndex.current.clear()
+        seen.current.clear()
+        cursorRef.current = { nextId: cursorRef.current.nextId }
+
+        const entries: FeedEntry[] = [ruleEntry(cursorRef.current, `jumped to #${id}`)]
+
+        for (const pair of pairs) {
+          enrichReply(pair.view)
+
+          if (pair.view.kind === 'message') {
+            messageIndex.current.set(pair.view.id, pair.view)
+            rawIndex.current.set(pair.view.id, pair.raw)
+            if (pair.view.senderId !== null) {
+              peerNames.current.set(pair.view.senderId, pair.view.senderName)
+            }
+          }
+
+          seen.current.add(pair.view.key)
+          entries.push(...buildViewEntries(cursorRef.current, pair.view))
+        }
+
+        replaceFeed(entries)
+        markRead(current.id, true)
+      } finally {
+        setBusy(null)
+      }
+    },
+    [enrichReply, markRead, me.id, replaceFeed, tg],
+  )
+
   const openChat = useCallback(
     async (ref: string) => {
-      const target = normalizeRef(ref)
-      if (target === '') return
+      const parsed = parsePeerRef(ref)
+      if (parsed.kind === 'empty') return
+
+      if (parsed.kind === 'invite') {
+        system('invite links are not supported yet — use /open @username or an id', 'warn')
+        return
+      }
 
       const token = ++loadToken.current
       setBusy('opening chat…')
       setOverlay(null)
 
       try {
-        const peer = await tg.getPeer(target)
+        const peer = await tg.getPeer(parsed.ref)
         const info = chatInfo(peer)
         const history = await loadRecentMessages(tg, me.id, peer.id)
 
         if (token !== loadToken.current) return
+
+        // Remember what was being typed, and restore this chat's own draft.
+        const previous = chatRef.current
+        if (previous && inputRef.current) drafts.current.set(previous.id, inputRef.current)
 
         chatRef.current = info
         setChat(info)
         applyBotCommands([])
         setReply(null)
         setTyping(null)
-        setInput('')
-        setCursor(0)
+
+        const draft = drafts.current.get(info.id) ?? ''
+        setInput(draft)
+        setCursor(graphemes(draft).length)
         messageIndex.current.clear()
         rawIndex.current.clear()
         seen.current.clear()
@@ -350,16 +428,33 @@ export function ChatScreen({
           if (chatRef.current?.id !== info.id) return
           applyBotCommands(list)
         })
+
+        // A t.me/<chat>/<id> link also says which message to look at.
+        if (parsed.messageId !== undefined) await jump(parsed.messageId)
       } catch (error) {
         system(describeError(error), 'error')
       } finally {
         if (token === loadToken.current) setBusy(null)
       }
     },
-    [applyBotCommands, enrichReply, markRead, me.id, replaceFeed, saveConfig, setReply, system, tg],
+    [
+      applyBotCommands,
+      enrichReply,
+      jump,
+      markRead,
+      me.id,
+      replaceFeed,
+      saveConfig,
+      setReply,
+      system,
+      tg,
+    ],
   )
 
   const closeChat = useCallback(() => {
+    const current = chatRef.current
+    if (current && inputRef.current) drafts.current.set(current.id, inputRef.current)
+
     chatRef.current = null
     setChat(null)
     applyBotCommands([])
@@ -399,6 +494,18 @@ export function ChatScreen({
 
       const items = page.items.map((pair) => pair.view)
       const visible = Math.max(2, Math.min(5, Math.floor((rows - 14) / 4)))
+
+      // Make the page addressable: reply, copy, save and /jump all resolve
+      // message ids through these indexes.
+      for (const pair of page.items) {
+        if (pair.view.kind !== 'message') continue
+        messageIndex.current.set(pair.view.id, pair.view)
+        rawIndex.current.set(pair.view.id, pair.raw)
+        if (pair.view.senderId !== null) {
+          peerNames.current.set(pair.view.senderId, pair.view.senderName)
+        }
+      }
+
       setOverlay({
         kind: 'history',
         items,
@@ -414,26 +521,100 @@ export function ChatScreen({
   }, [me.id, rows, system, tg])
 
   const showSearch = useCallback(
-    (query: string, all: boolean, hits: SearchHit[]) => {
-      pushEntries([{ kind: 'search', id: nextId(cursorRef.current), query, all, hits }])
+    (query: string, all: boolean, page: SearchPage) => {
+      pushEntries([
+        { kind: 'search', id: nextId(cursorRef.current), query, all, hits: page.hits },
+      ])
 
-      if (hits.length > 0) {
-        setOverlay({ kind: 'search', query, all, hits, index: 0 })
+      if (page.hits.length > 0) {
+        setOverlay({ kind: 'search', query, all, hits: page.hits, index: 0, next: page.next })
       }
     },
     [pushEntries],
   )
 
   const search = useCallback(
-    async (query: string, all: boolean): Promise<SearchHit[]> => {
-      if (all) return searchGlobal(tg, me.id, query)
+    async (query: string, all: boolean, cursor?: SearchCursor): Promise<SearchPage> => {
+      if (all) return searchGlobal(tg, me.id, query, { cursor })
 
       const current = chatRef.current
-      if (!current) return []
-      return searchInChat(tg, me.id, current.id, current.title, query)
+      if (!current) return { hits: [] }
+      return searchInChat(tg, me.id, current.id, current.title, query, { cursor })
     },
     [me.id, tg],
   )
+
+  /** Fetch the next page of the open search overlay. */
+  const loadMoreSearch = useCallback(async () => {
+    const current = overlayRef.current
+    if (!current || current.kind !== 'search') return
+    if (!current.next || current.loading) return
+
+    setOverlay((value) =>
+      value && value.kind === 'search' ? { ...value, loading: true } : value,
+    )
+
+    try {
+      const page = await search(current.query, current.all, current.next)
+
+      setOverlay((value) => {
+        if (!value || value.kind !== 'search') return value
+        if (value.query !== current.query) return value
+
+        const seen = new Set(value.hits.map((hit) => `${hit.chatId}:${hit.message.id}`))
+        const fresh = page.hits.filter((hit) => !seen.has(`${hit.chatId}:${hit.message.id}`))
+
+        return {
+          ...value,
+          hits: [...value.hits, ...fresh],
+          next: page.next,
+          loading: false,
+        }
+      })
+    } catch (error) {
+      system(describeError(error), 'error')
+      setOverlay((value) =>
+        value && value.kind === 'search' ? { ...value, loading: false } : value,
+      )
+    }
+  }, [search, system])
+
+  const loadDialogs = useCallback(
+    async (limit = dialogLimit.current): Promise<void> => {
+      try {
+        const items = await listDialogs(tg, limit)
+        chatListRef.current = items
+
+        for (const item of items) {
+          peerNames.current.set(item.id, item.title)
+          muted.current.set(item.id, item.muted)
+        }
+
+        setOverlay((current) =>
+          current && current.kind === 'chats'
+            ? {
+                ...current,
+                items: rankByFuzzy(items, current.query, (item) => `${item.title} ${item.username ?? ''}`),
+                loading: false,
+                hasMore: items.length >= limit,
+              }
+            : current,
+        )
+      } catch (error) {
+        system(describeError(error), 'error')
+        setOverlay((current) =>
+          current && current.kind === 'chats' ? { ...current, loading: false } : current,
+        )
+      }
+    },
+    [system, tg],
+  )
+
+  /** Extend the picker window when the chat you want is past the first page. */
+  const loadMoreDialogs = useCallback(() => {
+    dialogLimit.current += DIALOG_PAGE
+    void loadDialogs(dialogLimit.current)
+  }, [loadDialogs])
 
   const openOverlay = useCallback(
     (kind: 'chats' | 'help', initialQuery = '') => {
@@ -459,31 +640,17 @@ export function ChatScreen({
           (item) => `${item.title} ${item.username ?? ''}`,
         ),
         loading: true,
+        hasMore: chatListRef.current.length >= dialogLimit.current,
       })
 
-      void (async () => {
-        try {
-          const items = await listDialogs(tg)
-          chatListRef.current = items
-          for (const item of items) peerNames.current.set(item.id, item.title)
-          setOverlay((current) =>
-            current && current.kind === 'chats'
-              ? {
-                  ...current,
-                  items: rankByFuzzy(items, current.query, (item) => `${item.title} ${item.username ?? ''}`),
-                  loading: false,
-                }
-              : current,
-          )
-        } catch (error) {
-          system(describeError(error), 'error')
-          setOverlay((current) =>
-            current && current.kind === 'chats' ? { ...current, loading: false } : current,
-          )
-        }
-      })()
+      void loadDialogs()
     },
-    [system, tg],
+    [loadDialogs, system, tg],
+  )
+
+  const prepare = useCallback(
+    (text: string): InputText => (markdownRef.current ? parseMarkdown(text) : text),
+    [],
   )
 
   const download = useCallback(
@@ -570,7 +737,7 @@ export function ChatScreen({
 
         const replyId = replyRef.current?.id
         const sent = await tg.sendMedia(current.id, attachmentMedia(file), {
-          caption: caption ? parseMarkdown(caption) : undefined,
+          caption: caption ? prepare(caption) : undefined,
           replyTo: replyId ?? undefined,
           progressCallback: (uploaded, total) => {
             if (!Number.isFinite(total) || total <= 0) return
@@ -640,66 +807,6 @@ export function ChatScreen({
     [me.id, pushPair, setReply, tg],
   )
 
-  const jump = useCallback(
-    async (id: number): Promise<void> => {
-      const current = chatRef.current
-      if (!current) throw new Error('no chat is open')
-
-      setBusy(`jumping to #${id}…`)
-      setOverlay(null)
-
-      try {
-        const [target] = await tg.getMessages(current.id, [id])
-        if (!target) throw new Error(`message #${id} is not in this chat`)
-
-        const page = await tg.getHistory(current.id, {
-          offset: { id, date: Math.floor(target.date.getTime() / 1000) },
-          addOffset: -10,
-          limit: 21,
-        })
-
-        const messages = [...page].reverse()
-        if (!messages.some((message) => message.id === id)) messages.push(target)
-        messages.sort((a, b) => a.id - b.id)
-
-        const pairs = messages
-          .map((message) => mergePair(message, me.id))
-          .filter((pair): pair is MessagePair => pair !== null)
-
-        if (pairs.length === 0) throw new Error(`message #${id} has nothing to show`)
-
-        olderRef.current = page.next
-        messageIndex.current.clear()
-        rawIndex.current.clear()
-        seen.current.clear()
-        cursorRef.current = { nextId: cursorRef.current.nextId }
-
-        const entries: FeedEntry[] = [ruleEntry(cursorRef.current, `jumped to #${id}`)]
-
-        for (const pair of pairs) {
-          enrichReply(pair.view)
-
-          if (pair.view.kind === 'message') {
-            messageIndex.current.set(pair.view.id, pair.view)
-            rawIndex.current.set(pair.view.id, pair.raw)
-            if (pair.view.senderId !== null) {
-              peerNames.current.set(pair.view.senderId, pair.view.senderName)
-            }
-          }
-
-          seen.current.add(pair.view.key)
-          entries.push(...buildViewEntries(cursorRef.current, pair.view))
-        }
-
-        replaceFeed(entries)
-        markRead(current.id, true)
-      } finally {
-        setBusy(null)
-      }
-    },
-    [enrichReply, markRead, me.id, replaceFeed, tg],
-  )
-
   const edit = useCallback(
     async (id: number, text: string): Promise<void> => {
       const current = chatRef.current
@@ -708,7 +815,7 @@ export function ChatScreen({
       const updated = await tg.editMessage({
         chatId: current.id,
         message: id,
-        text: parseMarkdown(text),
+        text: prepare(text),
       })
 
       const view = toMessageView(updated, me.id)
@@ -717,7 +824,7 @@ export function ChatScreen({
         rawIndex.current.set(view.id, updated)
       }
     },
-    [me.id, tg],
+    [me.id, prepare, tg],
   )
 
   const remove = useCallback(
@@ -735,11 +842,11 @@ export function ChatScreen({
   )
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<boolean> => {
       const current = chatRef.current
       if (!current) {
         notifyToast('open a chat first — /chats', 'warn')
-        return
+        return false
       }
 
       setBusy('sending…')
@@ -750,7 +857,7 @@ export function ChatScreen({
         const replyId = replyRef.current?.id
         const sent = await tg.sendText(
           current.id,
-          parseMarkdown(text),
+          prepare(text),
           replyId ? { replyTo: replyId } : undefined,
         )
 
@@ -761,29 +868,29 @@ export function ChatScreen({
           pushPair(pair)
         }
         setSentHistory((history) => [...history.slice(-199), text])
+        return true
       } catch (error) {
-        system(describeError(error), 'error')
-        notifyToast(describeError(error), 'error')
+        const message = describeError(error)
+        system(`${message} — your message is still in the input box`, 'error')
+        notifyToast(message, 'error')
+        return false
       } finally {
         setBusy(null)
       }
     },
-    [me.id, notifyToast, pushPair, setReply, system, tg],
+    [me.id, notifyToast, prepare, pushPair, setReply, system, tg],
   )
 
   const runCommand = useCallback(
-    async (raw: string) => {
+    async (raw: string): Promise<boolean> => {
       const resolved = resolveInput(raw, commands)
 
       if (resolved.kind === 'warn') {
         system(resolved.message, 'warn')
-        return
+        return false
       }
 
-      if (resolved.kind === 'send') {
-        await sendMessage(resolved.text)
-        return
-      }
+      if (resolved.kind === 'send') return sendMessage(resolved.text)
 
       const { command, args } = resolved
 
@@ -825,6 +932,11 @@ export function ChatScreen({
           void saveConfig({ theme: value as ThemeName })
         },
         setShowIds,
+        markdown: markdownRef.current,
+        setMarkdown: async (value: boolean) => {
+          markdownRef.current = value
+          await saveConfig({ markdown: value })
+        },
         saveConfig,
         reloadBotCommands,
         clear: () => {
@@ -861,8 +973,10 @@ export function ChatScreen({
 
       try {
         await command.run(ctx, args, raw)
+        return true
       } catch (error) {
         system(describeError(error), 'error')
+        return false
       }
     },
     [
@@ -900,12 +1014,17 @@ export function ChatScreen({
 
   const submit = useCallback(
     (value: string) => {
-      const text = value.trim()
-      if (!text) return
+      const text = value.replace(/\s+$/, '')
+      if (!text.trim()) return
 
-      setInput('')
-      setCursor(0)
-      void runCommand(text)
+      // The input is only cleared once the line is handled, so a failed send
+      // leaves the text where the user can retry it.
+      void runCommand(text).then((handled) => {
+        if (!handled) return
+        if (inputRef.current !== value) return
+        setInput('')
+        setCursor(0)
+      })
     },
     [runCommand],
   )
@@ -975,6 +1094,14 @@ export function ChatScreen({
         }
         await jump(hit.message.id)
       })().catch((error) => system(describeError(error), 'error'))
+      return
+    }
+
+    if (overlay.kind === 'history') {
+      const view = overlay.items[overlay.index]
+      if (!view) return
+      setOverlay(null)
+      void jump(view.id).catch((error) => system(describeError(error), 'error'))
       return
     }
 
@@ -1073,8 +1200,8 @@ export function ChatScreen({
   const scrollHistory = useCallback((delta: number) => {
     setOverlay((current) => {
       if (!current || current.kind !== 'history') return current
-      const maxStart = Math.max(0, current.items.length - current.visible)
-      return { ...current, index: Math.max(0, Math.min(maxStart, current.index + delta)) }
+      const max = Math.max(0, current.items.length - 1)
+      return { ...current, index: Math.max(0, Math.min(max, current.index + delta)) }
     })
   }, [])
 
@@ -1097,9 +1224,16 @@ export function ChatScreen({
             const next = (current.index + delta + current.hits.length) % current.hits.length
             return { ...current, index: next }
           })
+        } else if (key.ctrl && inputChar === 'n') {
+          void loadMoreSearch()
         } else if (key.return) {
           selectOverlay()
         }
+        return
+      }
+
+      if (overlay.kind === 'chats' && key.ctrl && inputChar === 'n') {
+        loadMoreDialogs()
         return
       }
 
@@ -1107,6 +1241,8 @@ export function ChatScreen({
 
       if (key.escape) {
         setOverlay(null)
+      } else if (key.return) {
+        selectOverlay()
       } else if (key.upArrow) {
         scrollHistory(-1)
       } else if (key.downArrow) {
@@ -1118,10 +1254,7 @@ export function ChatScreen({
       } else if (key.home) {
         setOverlay({ ...overlay, index: 0 })
       } else if (key.end) {
-        setOverlay({
-          ...overlay,
-          index: Math.max(0, overlay.items.length - overlay.visible),
-        })
+        setOverlay({ ...overlay, index: Math.max(0, overlay.items.length - 1) })
       }
     },
     { isActive: true },
@@ -1152,12 +1285,24 @@ export function ChatScreen({
       if (message.isOutgoing) return
 
       const title = message.chat.displayName || String(chatId)
-      const text = message.text || 'new message'
-      notifyToast(`${title}: ${truncate(text, 70)}`, 'info')
+      const view = mergePair(message, me.id)?.view
+      const messageView = view?.kind === 'message' ? view : null
+      const body = truncate(
+        messageView?.text || messageView?.media.join(' ') || 'new message',
+        80,
+      )
+
+      notifyToast(`${title}: ${body}`, 'info')
+
+      // Muted chats stay silent; the in-app toast above is the only signal.
+      if (muted.current.get(chatId) === true) return
 
       const mode = notificationsRef.current
       if (mode === 'bell') ringBell()
-      else if (mode === 'macos') desktopNotify(title, text)
+      else if (mode === 'desktop' || mode === 'macos') {
+        const who = messageView && !messageView.fromMe ? messageView.senderName : null
+        desktopNotify(who ? `${title} · ${who}` : title, body)
+      }
     }
 
     const onEdit = (message: Message): void => {
@@ -1227,7 +1372,7 @@ export function ChatScreen({
     }
   }, [markRead, me.id, notifyToast, pushPair, setTyping, system, tg])
 
-  // Seed unread counts and names.
+  // Seed unread counts, names and mute flags.
   useEffect(() => {
     void listDialogs(tg)
       .then((items) => {
@@ -1235,6 +1380,7 @@ export function ChatScreen({
         const counts: Record<number, number> = {}
         for (const item of items) {
           peerNames.current.set(item.id, item.title)
+          muted.current.set(item.id, item.muted)
           if (item.unread > 0 && !locallyRead.current.has(item.id)) counts[item.id] = item.unread
         }
         setUnread(counts)
@@ -1298,9 +1444,9 @@ export function ChatScreen({
   const hintText = overlayInput
     ? 'enter select · ↑↓ move · esc close'
     : showHistoryOverlay
-      ? '↑↓ scroll · PgUp/PgDn · /jump #id · esc close'
+      ? '↑↓ scroll · PgUp/PgDn · enter jump · esc close'
       : showSearchOverlay
-        ? 'enter jump · ↑↓ move · esc close'
+        ? 'enter jump · ↑↓ move · ctrl+n more · esc close'
         : botCommands.length > 0
           ? columns < 68
             ? `/ bot (${botCommands.length}) · : telepi`
@@ -1333,6 +1479,22 @@ export function ChatScreen({
           />
         )}
 
+        {/* Outside the `!overlay` branch: progress and errors must stay visible
+            while a picker or a pager is open. */}
+        {busy && (
+          <Box paddingLeft={1} marginTop={1}>
+            <Spinner label={busy} color={theme.accent} />
+          </Box>
+        )}
+
+        {toast && (
+          <Box paddingLeft={1} marginTop={1}>
+            <Text color={toneColor(theme, toast.tone)}>
+              {truncate(toast.text, columns - 3)}
+            </Text>
+          </Box>
+        )}
+
         {!overlay && (
           <>
             {!chat && feed.length === 0 && (
@@ -1361,20 +1523,6 @@ export function ChatScreen({
                     `↩ replying to #${reply.id}${reply.text ? ` · ${reply.text}` : ''} · esc clears`,
                     columns - 3,
                   )}
-                </Text>
-              </Box>
-            )}
-
-            {busy && (
-              <Box paddingLeft={1} marginTop={1}>
-                <Spinner label={busy} color={theme.accent} />
-              </Box>
-            )}
-
-            {toast && (
-              <Box paddingLeft={1} marginTop={1}>
-                <Text color={toneColor(theme, toast.tone)}>
-                  {truncate(toast.text, columns - 3)}
                 </Text>
               </Box>
             )}

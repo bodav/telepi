@@ -22,6 +22,7 @@ describe('config', () => {
     expect(parsed.notifications).toBe('bell')
     expect(parsed.theme).toBe('auto')
     expect(parsed.showIds).toBe(false)
+    expect(parsed.markdown).toBe(true)
   })
 
   it('returns defaults when the file does not exist', async () => {

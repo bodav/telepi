@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 
-export const NotificationsSchema = z.enum(['off', 'bell', 'macos'])
+export const NotificationsSchema = z.enum(['off', 'bell', 'desktop', 'macos'])
 export type Notifications = z.infer<typeof NotificationsSchema>
 
 export const ThemeSchema = z.enum(['auto', 'dark', 'light', 'mono'])
@@ -16,6 +16,8 @@ export const ConfigSchema = z.object({
   notifications: NotificationsSchema.default('bell'),
   theme: ThemeSchema.default('auto'),
   showIds: z.boolean().default(false),
+  /** Parse outgoing text as markdown; off sends it verbatim. */
+  markdown: z.boolean().default(true),
 })
 export type Config = z.infer<typeof ConfigSchema>
 

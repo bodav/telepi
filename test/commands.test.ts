@@ -167,4 +167,17 @@ describe('resolveInput', () => {
   it('passes plain text through', () => {
     expect(resolveInput('hello there', commands)).toEqual({ kind: 'send', text: 'hello there' })
   })
+
+  it('keeps indentation in the message body', () => {
+    expect(resolveInput('    indented', commands)).toEqual({ kind: 'send', text: '    indented' })
+    expect(resolveInput('code\n  one\n  two  ', commands)).toEqual({
+      kind: 'send',
+      text: 'code\n  one\n  two',
+    })
+  })
+
+  it('still detects prefixes after leading whitespace', () => {
+    expect(resolveInput('  /ls', commands).kind).toBe('local')
+    expect(resolveInput('  //literal', commands)).toEqual({ kind: 'send', text: '/literal' })
+  })
 })

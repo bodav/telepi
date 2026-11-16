@@ -1,6 +1,6 @@
 import type { TelegramClient, User } from '@mtcute/node'
 import type { Config, Notifications, ThemeName } from '../core/config.js'
-import type { SearchHit, ChatInfo } from '../telegram/chats.js'
+import type { SearchCursor, SearchPage, ChatInfo } from '../telegram/chats.js'
 import type { BotCommand } from '../telegram/bot-commands.js'
 import type { MessageView } from '../telegram/message.js'
 import type { Tone } from '../chat/feed.js'
@@ -31,8 +31,8 @@ export interface CommandContext {
   messageById(id: number): MessageView | null
   jump(id: number): Promise<void>
 
-  search(query: string, all: boolean): Promise<SearchHit[]>
-  showSearch(query: string, all: boolean, hits: SearchHit[]): void
+  search(query: string, all: boolean, cursor?: SearchCursor): Promise<SearchPage>
+  showSearch(query: string, all: boolean, page: SearchPage): void
 
   copy(text: string): Promise<boolean>
   download(id: number, path?: string): Promise<string>
@@ -41,6 +41,10 @@ export interface CommandContext {
   sendBotCommand(command: string, args?: string): Promise<void>
   edit(id: number, text: string): Promise<void>
   remove(ids: number[]): Promise<void>
+
+  /** Whether outgoing text is parsed as markdown. */
+  markdown: boolean
+  setMarkdown(value: boolean): Promise<void>
 
   setNotify(value: Notifications): void
   setTheme(value: ThemeName): void

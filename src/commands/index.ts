@@ -1,4 +1,5 @@
 import { truncate } from '../core/text.js'
+import { canDesktopNotify } from '../core/notify.js'
 import { unreadChats } from '../telegram/chats.js'
 import { parseAttachmentArgs } from '../telegram/upload.js'
 import type { Command, CommandContext } from './types.js'
@@ -156,8 +157,8 @@ export const commands: readonly Command[] = [
       }
       if (!all && !needChat(ctx)) return
 
-      const hits = await ctx.search(query, all)
-      ctx.showSearch(query, all, hits)
+      const page = await ctx.search(query, all)
+      ctx.showSearch(query, all, page)
     },
   },
   {
@@ -395,24 +396,63 @@ export const commands: readonly Command[] = [
   },
   {
     name: 'notify',
-    args: '[off|bell|macos]',
+    args: '[off|bell|desktop|macos]',
     description: 'notification mode for other chats',
     group: 'app',
     run: async (ctx, args) => {
       const mode = args.trim().toLowerCase()
       if (!mode) {
-        ctx.system(`notifications: ${ctx.notifications} — use /notify off|bell|macos`, 'info')
+        ctx.system(
+          `notifications: ${ctx.notifications} — use /notify off|bell|desktop` +
+            (canDesktopNotify() ? '' : ' (desktop notifications are unavailable here)'),
+          'info',
+        )
         return
       }
 
-      if (mode !== 'off' && mode !== 'bell' && mode !== 'macos') {
-        ctx.system('usage: /notify off|bell|macos', 'warn')
+      if (mode !== 'off' && mode !== 'bell' && mode !== 'desktop' && mode !== 'macos') {
+        ctx.system('usage: /notify off|bell|desktop', 'warn')
         return
       }
 
       ctx.setNotify(mode)
       await ctx.saveConfig({ notifications: mode })
+
+      if ((mode === 'desktop' || mode === 'macos') && !canDesktopNotify()) {
+        ctx.system(
+          'desktop notifications need notify-send (Linux), osascript (macOS) or PowerShell (Windows) — the bell still works',
+          'warn',
+        )
+        return
+      }
+
       ctx.system(`notifications set to ${mode}`, 'ok')
+    },
+  },
+  {
+    name: 'md',
+    aliases: ['markdown'],
+    args: '[on|off]',
+    description: 'parse outgoing messages as markdown, or send them verbatim',
+    group: 'app',
+    run: async (ctx, args) => {
+      const mode = args.trim().toLowerCase()
+      if (!mode) {
+        ctx.system(
+          `markdown ${ctx.markdown ? 'on' : 'off'} — use /md on|off (off sends text and code verbatim)`,
+          'info',
+        )
+        return
+      }
+
+      if (mode !== 'on' && mode !== 'off') {
+        ctx.system('usage: /md on|off', 'warn')
+        return
+      }
+
+      const value = mode === 'on'
+      await ctx.setMarkdown(value)
+      ctx.system(`markdown ${mode} — ${value ? 'bold/italic/code are parsed' : 'text is sent verbatim'}`, 'ok')
     },
   },
   {

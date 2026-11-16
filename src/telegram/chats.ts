@@ -1,7 +1,7 @@
 import type { InputPeerLike, Message, Peer, TelegramClient } from '@mtcute/node'
 import type { ChatEventView, MessageView } from '../telegram/message.js'
 import { toMessageView } from '../telegram/message.js'
-import { DIALOG_LIMIT, INITIAL_HISTORY, OLDER_HISTORY } from '../core/constants.js'
+import { DIALOG_LIMIT, INITIAL_HISTORY, OLDER_HISTORY, SEARCH_PAGE } from '../core/constants.js'
 
 export interface ChatInfo {
   peer: Peer
@@ -41,10 +41,10 @@ export function chatInfo(peer: Peer): ChatInfo {
   }
 }
 
-export async function listDialogs(tg: TelegramClient): Promise<ChatListItem[]> {
+export async function listDialogs(tg: TelegramClient, limit = DIALOG_LIMIT): Promise<ChatListItem[]> {
   const items: ChatListItem[] = []
 
-  for await (const dialog of tg.iterDialogs({ limit: DIALOG_LIMIT })) {
+  for await (const dialog of tg.iterDialogs({ limit, chunkSize: 100 })) {
     const last = dialog.lastMessage
     items.push({
       id: dialog.peer.id,
@@ -107,34 +107,61 @@ export interface SearchHit {
   message: MessageView
 }
 
+/** Where the next page of a search starts. Opaque to callers. */
+type ChatSearchOffset = NonNullable<
+  Awaited<ReturnType<TelegramClient['searchMessages']>>['next']
+>
+type GlobalSearchOffset = NonNullable<
+  Awaited<ReturnType<TelegramClient['searchGlobal']>>['next']
+>
+
+export type SearchCursor =
+  | { kind: 'chat'; offset: ChatSearchOffset }
+  | { kind: 'global'; offset: GlobalSearchOffset }
+
+export interface SearchPage {
+  hits: SearchHit[]
+  next?: SearchCursor
+}
+
 export async function searchInChat(
   tg: TelegramClient,
   meId: number,
   peer: InputPeerLike,
   chatTitle: string,
   query: string,
-  limit = 20,
-): Promise<SearchHit[]> {
-  const result = await tg.searchMessages({ chatId: peer, query, limit })
+  options: { limit?: number; cursor?: SearchCursor } = {},
+): Promise<SearchPage> {
+  const limit = options.limit ?? SEARCH_PAGE
+  const offset =
+    options.cursor && options.cursor.kind === 'chat' ? options.cursor.offset : undefined
 
-  return result
+  const result = await tg.searchMessages({ chatId: peer, query, limit, offset })
+
+  const hits = result
     .map((message) => {
       const view = toMessageView(message, meId)
       if (!view || view.kind !== 'message') return null
       return { chatId: message.chat.id, chatTitle, message: view }
     })
     .filter((hit): hit is SearchHit => hit !== null)
+
+  return { hits, next: result.next === undefined ? undefined : { kind: 'chat', offset: result.next } }
 }
 
 export async function searchGlobal(
   tg: TelegramClient,
   meId: number,
   query: string,
-  limit = 20,
-): Promise<SearchHit[]> {
-  const result = await tg.searchGlobal({ query, limit })
+  options: { limit?: number; cursor?: SearchCursor } = {},
+): Promise<SearchPage> {
+  const limit = options.limit ?? SEARCH_PAGE
+  const offset =
+    options.cursor && options.cursor.kind === 'global' ? options.cursor.offset : undefined
 
-  return result
+  const result = await tg.searchGlobal({ query, limit, offset })
+
+  const hits = result
     .map((message) => {
       const view = toMessageView(message, meId)
       if (!view || view.kind !== 'message') return null
@@ -145,6 +172,11 @@ export async function searchGlobal(
       }
     })
     .filter((hit): hit is SearchHit => hit !== null)
+
+  return {
+    hits,
+    next: result.next === undefined ? undefined : { kind: 'global', offset: result.next },
+  }
 }
 
 export async function unreadChats(tg: TelegramClient): Promise<ChatListItem[]> {

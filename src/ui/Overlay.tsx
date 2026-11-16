@@ -1,6 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { ChatListItem, SearchHit } from '../telegram/chats.js'
+import type { ChatListItem, SearchCursor, SearchHit } from '../telegram/chats.js'
 import type { ChatEventView } from '../telegram/message.js'
 import type { PaletteItem } from '../commands/types.js'
 import { formatClock } from '../core/time.js'
@@ -10,9 +10,9 @@ import { peerColor } from './theme.js'
 import { MessageRow } from './MessageRow.js'
 
 export type OverlayState =
-  | { kind: 'chats'; query: string; index: number; items: ChatListItem[]; loading: boolean }
+  | { kind: 'chats'; query: string; index: number; items: ChatListItem[]; loading: boolean; hasMore?: boolean }
   | { kind: 'help'; query: string; index: number; items: PaletteItem[] }
-  | { kind: 'search'; query: string; all: boolean; hits: SearchHit[]; index: number }
+  | { kind: 'search'; query: string; all: boolean; hits: SearchHit[]; index: number; next?: SearchCursor; loading?: boolean }
   | { kind: 'history'; items: ChatEventView[]; index: number; hasMore: boolean; visible: number }
 
 export interface OverlayProps {
@@ -111,7 +111,14 @@ function ChatsOverlay({
       })}
 
       {hiddenBelow > 0 && <Text dimColor>↓ {hiddenBelow} more</Text>}
-      <Text dimColor>{truncate('enter open · ↑↓ move · esc close', columns - 4)}</Text>
+      <Text dimColor>
+        {truncate(
+          overlay.hasMore && overlay.items.length < 3
+            ? 'enter open · ↑↓ move · ctrl+n load older chats · esc close'
+            : 'enter open · ↑↓ move · esc close',
+          columns - 4,
+        )}
+      </Text>
     </>,
     theme,
   )
@@ -218,7 +225,8 @@ function SearchOverlay({
         </Text>
         <Text dimColor>
           {truncate(
-            ` · “${overlay.query}” · ${items.length} result${items.length === 1 ? '' : 's'}`,
+            ` · “${overlay.query}” · ${items.length} result${items.length === 1 ? '' : 's'}` +
+              `${overlay.loading ? ' · loading…' : overlay.next ? ' · more available' : ''}`,
             columns - 22,
           )}
         </Text>
@@ -244,7 +252,12 @@ function SearchOverlay({
 
       {items.length === 0 && <Text dimColor>nothing matched</Text>}
       {hiddenBelow > 0 && <Text dimColor>↓ {hiddenBelow} more</Text>}
-      <Text dimColor>{truncate('enter jump · ↑↓ move · esc close', columns - 4)}</Text>
+      <Text dimColor>
+        {truncate(
+          overlay.next ? 'enter jump · ↑↓ move · ctrl+n more results · esc close' : 'enter jump · ↑↓ move · esc close',
+          columns - 4,
+        )}
+      </Text>
     </>,
     theme,
   )
@@ -291,7 +304,7 @@ function HistoryOverlay({
       )}
 
       <Text dimColor>
-        {truncate('↑↓ line · PgUp/PgDn page · /jump #id · esc close', columns - 4)}
+        {truncate('↑↓ line · PgUp/PgDn page · enter jump to it · esc close', columns - 4)}
       </Text>
     </Box>
   )

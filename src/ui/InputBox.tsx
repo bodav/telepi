@@ -166,12 +166,34 @@ export function InputBox({
         return
       }
 
-      if (key.escape) {
-        onChange('', 0)
-        return
-      }
-
       if (key.ctrl) {
+        // Readline-style editing: escape no longer throws the draft away, so
+        // these are the way to clear or chop a line.
+        if (input === 'u') {
+          onChange('', 0)
+          return
+        }
+        if (input === 'k') {
+          onChange(values.slice(0, position).join(''), position)
+          return
+        }
+        if (input === 'w') {
+          const before = values.slice(0, position)
+          let cut = before.length
+          while (cut > 0 && /\s/.test(before[cut - 1]!)) cut--
+          while (cut > 0 && !/\s/.test(before[cut - 1]!)) cut--
+          const next = [...before.slice(0, cut), ...values.slice(position)].join('')
+          onChange(next, cut)
+          return
+        }
+        if (input === 'a') {
+          onChange(value, 0)
+          return
+        }
+        if (input === 'e') {
+          onChange(value, max)
+          return
+        }
         return
       }
 

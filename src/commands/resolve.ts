@@ -16,15 +16,20 @@ export type ResolvedInput =
  * - `/name` runs a telepi command when one matches, and is forwarded to
  *   Telegram otherwise — so bot commands keep working.
  * - `/name@bot` always goes to Telegram, since that form is Telegram's.
+ *
+ * Prefix detection ignores leading whitespace, but the body keeps it:
+ * indentation inside pasted code has to survive the round trip.
  */
 export function resolveInput(input: string, local: readonly Command[]): ResolvedInput {
-  const text = input.trim()
-  if (!text) return { kind: 'send', text: '' }
+  const text = input.replace(/\s+$/, '')
+  const head = text.trimStart()
 
-  if (text.startsWith('//')) return { kind: 'send', text: text.slice(1) }
+  if (!head) return { kind: 'send', text: '' }
 
-  if (text.startsWith(':')) {
-    const parsed = parseCommand(text, ':')
+  if (head.startsWith('//')) return { kind: 'send', text: head.slice(1) }
+
+  if (head.startsWith(':')) {
+    const parsed = parseCommand(head, ':')
     if (!parsed) return { kind: 'send', text }
 
     const command = findCommand(local, parsed.name)
@@ -36,16 +41,16 @@ export function resolveInput(input: string, local: readonly Command[]): Resolved
     return { kind: 'warn', message: `unknown telepi command :${parsed.name} — try :help` }
   }
 
-  if (text.startsWith('/')) {
-    if (/^\/\S+@/.test(text)) return { kind: 'send', text }
+  if (head.startsWith('/')) {
+    if (/^\/\S+@/.test(head)) return { kind: 'send', text: head }
 
-    const parsed = parseCommand(text)
+    const parsed = parseCommand(head)
     if (!parsed) return { kind: 'warn', message: 'not a command — try /help or :help' }
 
     const command = findCommand(local, parsed.name)
     if (command) return { kind: 'local', command, args: parsed.args }
 
-    return { kind: 'send', text }
+    return { kind: 'send', text: head }
   }
 
   return { kind: 'send', text }

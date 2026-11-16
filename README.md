@@ -165,7 +165,7 @@ login entirely.
 | `/close` | close the current chat |
 | `/older` | older messages in a scrollable pager |
 | `/jump <id>` | load a message and its context into the feed |
-| `/search [all] <query>` | search this chat, or all chats |
+| `/search [all] <query>` | search this chat, or all chats (`ctrl+n` for more hits) |
 | `/reply [id]` | reply to a message (defaults to the last one) |
 | `/edit <id> <text>` | edit your message |
 | `/delete <id...>` | delete messages |
@@ -176,7 +176,8 @@ login entirely.
 | `/unread` | chats with unread messages |
 | `/login` | show the signed-in account |
 | `/me` | account details |
-| `/notify off\|bell\|macos` | notifications for other chats |
+| `/notify off\|bell\|desktop` | notifications for other chats (muted chats stay silent) |
+| `/md [on\|off]` | parse outgoing text as Markdown, or send it verbatim |
 | `/theme auto\|dark\|light\|mono` | colours |
 | `/ids [on\|off]` | show message ids in the feed |
 | `/clear` | clear screen and feed |
@@ -225,7 +226,17 @@ tokens like `:D` or `:ok` are still sent as ordinary text.
 
 Outgoing text is parsed as Telegram-flavoured Markdown: `**bold**`,
 `__italic__`, `~~strike~~`, `||spoiler||` and `` `code` ``. Arguments containing
-spaces can be quoted: `/open "My Group"`.
+spaces can be quoted: `/open "My Group"`. `/md off` switches that parsing off,
+so pasted code and text with underscores or asterisks is sent exactly as typed.
+A message keeps its indentation either way.
+
+`/open` accepts `@username`, a marked id, `t.me/name/123`, `t.me/c/<id>/<msg>`,
+`tg://` deep links and invite links (invites are reported as unsupported
+instead of resolving to a bogus chat). A link that points at a message opens
+the chat and jumps to that message.
+
+A message that fails to send stays in the input box, and switching chats keeps
+each chat's draft until you come back to it.
 
 ## Keys
 
@@ -235,7 +246,10 @@ spaces can be quoted: `/open "My Group"`.
 | `alt+enter` or `\` + `enter` | newline |
 | `↑` / `↓` | input history (or move through menus) |
 | `tab` | complete a command / move between credential fields |
-| `esc` | close overlay, clear reply, clear input |
+| `esc` | close overlay, clear reply |
+| `ctrl+n` | more search hits / more chats in the picker |
+| `ctrl+a` / `ctrl+e` | start / end of line |
+| `ctrl+u` / `ctrl+k` / `ctrl+w` | clear line / kill to end / delete word |
 | `ctrl+l` | repaint |
 | `ctrl+c` | quit |
 

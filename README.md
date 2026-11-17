@@ -37,7 +37,7 @@ Claude Code, Copilot CLI or pi.
   ╭────────────────────────────────────────────────────────────╮
   │ ❯ message Durov…                                           │
   ╰────────────────────────────────────────────────────────────╯
-   enter send · \⏎ newline · ↑ history · /help        telepi 0.2.1
+   enter send · \⏎ newline · ↑ history · /help        telepi 0.2.2
 ```
 
 ## Features
@@ -47,6 +47,9 @@ Claude Code, Copilot CLI or pi.
   supported as a fallback.
 - **A chat, not a dashboard** — open a chat with `/chats`, read it in native
   terminal scrollback, type at the bottom. No alternate screen, no mouse.
+- **Know who is talking** — every message carries a coloured bar in the left
+  gutter; your own messages get a heavier bar, and the prompt stays pinned to
+  the bottom of the window when you resize it.
 - **Slash command palette** — fuzzy autocomplete above the prompt, `/help`
   overlay, `/older` pager for history that has scrolled away.
 - **Telegram formatting** — bold, italic, underline, strike, spoiler, inline
@@ -99,15 +102,15 @@ docker run --rm -it -e TERM=xterm-256color -e API_ID -e API_HASH -v telepi-confi
 ```
 
 Version tags are published as `X.Y.Z`, `X.Y`, and `latest`, so use a tag such as
-`ghcr.io/bodav/telepi:0.2.1` to pin a release. The GHCR package must be public in
+`ghcr.io/bodav/telepi:0.2.2` to pin a release. The GHCR package must be public in
 the repository's package settings for anonymous pulls; if it is private, run
 `docker login ghcr.io` first with a token that has `read:packages`.
 
 Publish a new version by pushing a tag:
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 To build the image locally instead, run `docker build -t telepi .` from the

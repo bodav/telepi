@@ -37,7 +37,7 @@ Claude Code, Copilot CLI or pi.
   ╭────────────────────────────────────────────────────────────╮
   │ ❯ message Durov…                                           │
   ╰────────────────────────────────────────────────────────────╯
-   enter send · \⏎ newline · ↑ history · /help        telepi 0.2.2
+   enter send · \⏎ newline · ↑ history · /help        telepi 0.2.3
 ```
 
 ## Features
@@ -105,15 +105,15 @@ docker run --rm -it -e TERM=xterm-256color -e API_ID -e API_HASH -v telepi-confi
 ```
 
 Version tags are published as `X.Y.Z`, `X.Y`, and `latest`, so use a tag such as
-`ghcr.io/bodav/telepi:0.2.2` to pin a release. The GHCR package must be public in
+`ghcr.io/bodav/telepi:0.2.3` to pin a release. The GHCR package must be public in
 the repository's package settings for anonymous pulls; if it is private, run
 `docker login ghcr.io` first with a token that has `read:packages`.
 
 Publish a new version by pushing a tag:
 
 ```bash
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 To build the image locally instead, run `docker build -t telepi .` from the

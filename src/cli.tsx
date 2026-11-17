@@ -1,6 +1,7 @@
 import type { TelegramClient } from '@mtcute/node'
 import { VERSION } from './core/constants.js'
 import { LOGO_LINES } from './core/logo.js'
+import { installResizeReflowFix } from './core/resize-reflow.js'
 
 interface Args {
   chat?: string
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
   const runtime: { client: TelegramClient | null } = { client: null }
   let instance: ReturnType<typeof render> | undefined
 
-  instance = render(
+  const app = (
     <App
       initialChat={args.chat}
       action={args.login ? 'login' : args.logout ? 'logout' : undefined}
@@ -112,13 +113,20 @@ async function main(): Promise<void> {
         instance?.clear()
         process.stdout.write('\x1b[2J\x1b[3J\x1b[H')
       }}
-    />,
-    { exitOnCtrlC: true },
+    />
   )
 
+  const uninstallReflowFix = installResizeReflowFix(process.stdout, {
+    clear: () => instance?.clear(),
+    rerender: () => instance?.rerender(app),
+  })
+
   try {
+    instance = render(app, { exitOnCtrlC: true })
+
     await instance.waitUntilExit()
   } finally {
+    uninstallReflowFix()
     if (runtime.client) await runtime.client.destroy().catch(() => {})
   }
 }

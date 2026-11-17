@@ -37,6 +37,7 @@ import { loadBotCommands } from '../telegram/bot-commands.js'
 import { attachmentMedia, resolveAttachment } from '../telegram/upload.js'
 import { CommandMenu } from './CommandMenu.js'
 import { FeedLine } from './FeedLine.js'
+import { entryRows, frameMinHeight } from './feed-rows.js'
 import { InputBox } from './InputBox.js'
 import { Logo } from './Logo.js'
 import { Overlay, type OverlayState } from './Overlay.js'
@@ -113,6 +114,12 @@ export function ChatScreen({
   const [notifications, setNotifications] = useState<Notifications>(config.notifications)
   const [showIds, setShowIdsState] = useState(config.showIds)
   const [now, setNow] = useState(() => Date.now())
+  const [, setViewportEpoch] = useState(0)
+
+  const themeRef = useRef(theme)
+  themeRef.current = theme
+  /** Rows of `<Static>` output written since the last viewport reset. */
+  const committedRowsRef = useRef(0)
 
   const chatRef = useRef<ChatInfo | null>(null)
   const botCommandsRef = useRef<readonly BotCommand[]>([])
@@ -182,31 +189,78 @@ export function ChatScreen({
     return () => clearTimeout(timer)
   }, [toast])
 
-  const pushEntries = useCallback((entries: FeedEntry[]) => {
-    if (entries.length === 0) return
-    setReplay([])
-    setFeed((previous) => [...previous, ...entries])
-  }, [])
+  // Ink draws the live frame directly under the last committed line. Count the
+  // rows the feed is about to write to the terminal so the frame can reserve the
+  // remaining viewport rows and stay pinned to the bottom. Measuring happens in
+  // the event handlers that change the feed, before React commits: the height
+  // has to be known when Ink writes the frame, or a fresh chat would scroll its
+  // own history away.
+  const measureCommittedRows = useCallback(
+    (entries: readonly FeedEntry[]) => {
+      const cap = Math.max(0, rows - 1)
+      const current = Math.min(committedRowsRef.current, cap)
+      let added = 0
 
-  const replaceFeed = useCallback((entries: FeedEntry[]) => {
-    setReplay([])
-    setFeed(entries)
-    setFeedEpoch((value) => value + 1)
-  }, [])
+      if (current < cap) {
+        // Only the newest entries can be visible below the viewport top.
+        for (let index = entries.length - 1; index >= 0 && current + added < cap; index--) {
+          const entry = entries[index]
+          if (entry) added += entryRows(entry, themeRef.current, columns, showIds)
+        }
+      }
+
+      committedRowsRef.current = Math.min(cap, current + added)
+    },
+    [columns, rows, showIds],
+  )
+
+  const pushEntries = useCallback(
+    (entries: FeedEntry[]) => {
+      if (entries.length === 0) return
+      measureCommittedRows(entries)
+      setReplay([])
+      setFeed((previous) => [...previous, ...entries])
+    },
+    [measureCommittedRows],
+  )
+
+  const replaceFeed = useCallback(
+    (entries: FeedEntry[]) => {
+      measureCommittedRows(entries)
+      setReplay([])
+      setFeed(entries)
+      setFeedEpoch((value) => value + 1)
+    },
+    [measureCommittedRows],
+  )
 
   useEffect(() => {
     feedRef.current = feed
   }, [feed])
 
+  const resetViewport = useCallback(() => {
+    committedRowsRef.current = 0
+    setViewportEpoch((value) => value + 1)
+  }, [])
+
+  const clearScreen = useCallback(() => {
+    resetViewport()
+    onClearScreen()
+  }, [onClearScreen, resetViewport])
+
   useEffect(() => {
     return onResizeReset(() => {
+      // The workaround scrolled the viewport into scrollback and will repaint a
+      // fresh frame, so the space below it is empty again.
+      resetViewport()
+
       const current = feedRef.current
       if (current.length === 0) return
 
       const keep = Math.max(4, Math.min(24, Math.ceil(rows / 2)))
       setReplay(current.slice(-keep))
     })
-  }, [rows])
+  }, [resetViewport, rows])
 
   const enrichReply = useCallback((view: ChatEventView): void => {
     if (view.kind !== 'message' || !view.reply || view.reply.snippet) return
@@ -959,7 +1013,7 @@ export function ChatScreen({
         saveConfig,
         reloadBotCommands,
         clear: () => {
-          onClearScreen()
+          clearScreen()
           cursorRef.current = { nextId: cursorRef.current.nextId }
           const current = chatRef.current
           replaceFeed(
@@ -1000,6 +1054,7 @@ export function ChatScreen({
     },
     [
       closeChat,
+      clearScreen,
       download,
       edit,
       jump,
@@ -1008,7 +1063,6 @@ export function ChatScreen({
       loadOlder,
       me,
       messageById,
-      onClearScreen,
       onLogout,
       onQuit,
       openChat,
@@ -1227,7 +1281,7 @@ export function ChatScreen({
   useInput(
     (inputChar, key) => {
       if (key.ctrl && inputChar === 'l') {
-        onClearScreen()
+        clearScreen()
         return
       }
 
@@ -1427,6 +1481,8 @@ export function ChatScreen({
   const showHistoryOverlay = overlay?.kind === 'history'
   const showSearchOverlay = overlay?.kind === 'search'
   const hideInput = showHistoryOverlay || showSearchOverlay
+  const committedRows = Math.min(committedRowsRef.current, Math.max(0, rows - 1))
+  const minHeight = frameMinHeight(rows, committedRows)
 
   const rightStatus = [
     reply && !overlay ? 'reply on' : null,
@@ -1487,7 +1543,7 @@ export function ChatScreen({
         )}
       </Static>
 
-      <Box flexDirection="column">
+      <Box flexDirection="column" minHeight={minHeight || undefined} justifyContent="flex-end">
         {overlay && (
           <Overlay
             overlay={overlay}

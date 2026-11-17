@@ -1,5 +1,5 @@
 export const APP_NAME = 'telepi'
-export const VERSION = '0.2.0'
+export const VERSION = '0.2.1'
 export const SITE_APPS = 'https://my.telegram.org/apps'
 export const INITIAL_HISTORY = 40
 export const OLDER_HISTORY = 30

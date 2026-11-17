@@ -9,6 +9,7 @@ import {
   saveConfig as persistConfig,
 } from '../core/config.js'
 import { describeError } from '../core/errors.js'
+import { onResizeReset } from '../core/resize-events.js'
 import { checkSession, logout } from '../telegram/auth.js'
 import { createTelegramClient } from '../telegram/client.js'
 import { ChatScreen } from './ChatScreen.js'
@@ -36,6 +37,7 @@ export function App({ initialChat, action, onClient, onClearScreen }: AppProps):
   const [me, setMe] = useState<User | null>(null)
   const [fatal, setFatal] = useState<string>('')
   const [bootLabel, setBootLabel] = useState('starting…')
+  const [, setResizeEpoch] = useState(0)
 
   const configRef = useRef<Config | null>(null)
   const clientRef = useRef<TelegramClient | null>(null)
@@ -96,6 +98,10 @@ export function App({ initialChat, action, onClient, onClearScreen }: AppProps):
     },
     [action, keepClient],
   )
+
+  useEffect(() => {
+    return onResizeReset(() => setResizeEpoch((value) => value + 1))
+  }, [])
 
   useEffect(() => {
     void (async () => {

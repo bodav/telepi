@@ -17,6 +17,7 @@ import { TYPING_MS, TOAST_MS, DIALOG_LIMIT, DIALOG_PAGE } from '../core/constant
 import { describeError } from '../core/errors.js'
 import { desktopNotify, ringBell } from '../core/notify.js'
 import { openPath } from '../core/open.js'
+import { onResizeReset } from '../core/resize-events.js'
 import { parsePeerRef } from '../core/peer-ref.js'
 import { displayWidth, graphemes, rankByFuzzy, truncate } from '../core/text.js'
 import { formatBytes, formatClock } from '../core/time.js'
@@ -94,6 +95,7 @@ export function ChatScreen({
   const [botCommands, setBotCommands] = useState<readonly BotCommand[]>([])
   const [feed, setFeed] = useState<FeedEntry[]>([])
   const [feedEpoch, setFeedEpoch] = useState(0)
+  const [replay, setReplay] = useState<FeedEntry[]>([])
   const [input, setInput] = useState('')
   const [cursor, setCursor] = useState(0)
   const [filterCursor, setFilterCursor] = useState(0)
@@ -130,6 +132,7 @@ export function ChatScreen({
   const logoutArmed = useRef(0)
   const booted = useRef(false)
   const locallyRead = useRef(new Set<number>())
+  const feedRef = useRef<FeedEntry[]>([])
   /** Unsent text per chat, so switching chats never eats a half-written message. */
   const drafts = useRef(new Map<number, string>())
   const inputRef = useRef('')
@@ -181,13 +184,29 @@ export function ChatScreen({
 
   const pushEntries = useCallback((entries: FeedEntry[]) => {
     if (entries.length === 0) return
+    setReplay([])
     setFeed((previous) => [...previous, ...entries])
   }, [])
 
   const replaceFeed = useCallback((entries: FeedEntry[]) => {
+    setReplay([])
     setFeed(entries)
     setFeedEpoch((value) => value + 1)
   }, [])
+
+  useEffect(() => {
+    feedRef.current = feed
+  }, [feed])
+
+  useEffect(() => {
+    return onResizeReset(() => {
+      const current = feedRef.current
+      if (current.length === 0) return
+
+      const keep = Math.max(4, Math.min(24, Math.ceil(rows / 2)))
+      setReplay(current.slice(-keep))
+    })
+  }, [rows])
 
   const enrichReply = useCallback((view: ChatEventView): void => {
     if (view.kind !== 'message' || !view.reply || view.reply.snippet) return
@@ -1497,6 +1516,20 @@ export function ChatScreen({
 
         {!overlay && (
           <>
+            {replay.length > 0 && (
+              <Box flexDirection="column">
+                {replay.map((entry) => (
+                  <FeedLine
+                    key={`replay-${entry.id}`}
+                    entry={entry}
+                    theme={theme}
+                    columns={columns}
+                    showIds={showIds}
+                  />
+                ))}
+              </Box>
+            )}
+
             {!chat && feed.length === 0 && (
               <Box flexDirection="column" marginTop={1} paddingLeft={1}>
                 <Logo theme={theme} columns={columns} version />

@@ -1,6 +1,7 @@
 import type { TelegramClient } from '@mtcute/node'
 import { VERSION } from './core/constants.js'
 import { LOGO_LINES } from './core/logo.js'
+import { resizeEvents } from './core/resize-events.js'
 import { installResizeReflowFix } from './core/resize-reflow.js'
 
 interface Args {
@@ -118,7 +119,7 @@ async function main(): Promise<void> {
 
   const uninstallReflowFix = installResizeReflowFix(process.stdout, {
     clear: () => instance?.clear(),
-    rerender: () => instance?.rerender(app),
+    rerender: () => resizeEvents.emit('reset'),
   })
 
   try {

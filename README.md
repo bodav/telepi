@@ -312,8 +312,9 @@ QR codes come from `qr`; the session uses SQLite through `@mtcute/node`.
   directory for a second account.
 - No reactions, polls, stories, folders, archived chats or forum-topic
   navigation yet.
-- Resizing the window repaints a clean prompt at the bottom; the conversation
-  remains in terminal scrollback (scroll up to see it).
+- Resizing the window repaints the recent conversation and a clean prompt at
+  the bottom; older messages remain in terminal scrollback (scroll up to see
+  them).
 - Messages already in terminal scrollback are immutable; an edit or delete of
   an old message prints a dim notification instead of rewriting history.
   `/jump <id>` reloads a context window when you need to act on an old message.

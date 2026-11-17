@@ -35,9 +35,20 @@ export function MessageRow({
   if (showIds) footer.push(`#${view.id}`)
   if (view.edited) footer.push('edited')
   if (view.views !== null) footer.push(`${formatCount(view.views)} views`)
+  const marker = !compact
 
   return (
-    <Box flexDirection="column" marginTop={view.showHeader ? 1 : 0}>
+    <Box
+      flexDirection="column"
+      marginTop={view.showHeader ? 1 : 0}
+      borderStyle={marker ? (view.fromMe ? 'bold' : 'single') : undefined}
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      borderLeft={marker}
+      borderColor={marker ? color : undefined}
+      borderDimColor={marker && !view.fromMe}
+    >
       {view.showHeader && (
         <Box paddingLeft={1}>
           <Text dimColor>{formatClock(view.date)} </Text>

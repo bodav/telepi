@@ -1,6 +1,7 @@
 import React, { useMemo, useRef } from 'react'
-import { Box, Text, useInput, type Key } from 'ink'
+import { Box, Text, useInput, usePaste, type Key } from 'ink'
 import { graphemes } from '../core/text.js'
+import { lineEnd, lineStart, moveVertical, spliceChars, wordEnd, wordStart } from './input-edit.js'
 
 export interface InputBoxProps {
   value: string
@@ -21,7 +22,7 @@ export interface InputBoxProps {
 
 /**
  * Terminal input with grapheme-aware cursor movement, multiline editing
- * (backslash+enter or alt+enter) and shell-style history recall.
+ * (backslash+enter or alt+enter), safe paste and shell-style history recall.
  */
 export function InputBox({
   value,
@@ -57,24 +58,14 @@ export function InputBox({
   }
 
   const insert = (text: string): void => {
-    const before = values.slice(0, position).join('')
-    const after = values.slice(position).join('')
     const insertText = text.replace(/\r\n?/g, '\n')
-    setValue(before + insertText + after, position + graphemes(insertText).length)
+    const next = spliceChars(values, position, position, insertText)
+    setValue(next.value, next.cursor)
   }
 
-  const backspace = (): void => {
-    if (position === 0) return
-    const before = values.slice(0, position - 1).join('')
-    const after = values.slice(position).join('')
-    setValue(before + after, position - 1)
-  }
-
-  const del = (): void => {
-    if (position >= max) return
-    const before = values.slice(0, position).join('')
-    const after = values.slice(position + 1).join('')
-    setValue(before + after, position)
+  const erase = (from: number, to: number): void => {
+    const next = spliceChars(values, from, to)
+    setValue(next.value, next.cursor)
   }
 
   const recall = (direction: -1 | 1): void => {
@@ -107,28 +98,38 @@ export function InputBox({
       if (disabled) return
       if (onSpecialKey?.(key, input)) return
 
+      const word = key.ctrl || key.meta
+
       if (key.leftArrow) {
-        onChange(value, Math.max(0, position - 1))
+        onChange(value, word ? wordStart(values, position) : Math.max(0, position - 1))
         return
       }
 
       if (key.rightArrow) {
-        onChange(value, Math.min(max, position + 1))
+        onChange(value, word ? wordEnd(values, position) : Math.min(max, position + 1))
         return
       }
 
       if (key.home) {
-        onChange(value, 0)
+        onChange(value, lineStart(values, position))
         return
       }
 
       if (key.end) {
-        onChange(value, max)
+        onChange(value, lineEnd(values, position))
         return
       }
 
       if (key.upArrow || key.downArrow) {
-        if (multiline && value.includes('\n')) return
+        if (multiline && value.includes('\n')) {
+          const next = moveVertical(values, position, key.upArrow ? -1 : 1)
+          if (next !== position) {
+            onChange(value, next)
+            return
+          }
+          // At the first or last line there is nowhere to move, so fall through
+          // to history recall.
+        }
         recall(key.upArrow ? -1 : 1)
         return
       }
@@ -137,7 +138,7 @@ export function InputBox({
 
       if (key.return) {
         const continuation = multiline && (key.meta || key.shift)
-        const backslash = multiline && position > 0 && chars[position - 1] === '\\'
+        const backslash = multiline && position > 0 && values[position - 1] === '\\'
 
         if (backslash) {
           const before = values.slice(0, position - 1).join('')
@@ -160,9 +161,21 @@ export function InputBox({
         return
       }
 
-      if (key.backspace || key.delete) {
-        if (key.backspace) backspace()
-        else del()
+      if (key.backspace) {
+        if (word) {
+          erase(wordStart(values, position), position)
+        } else {
+          erase(Math.max(0, position - 1), position)
+        }
+        return
+      }
+
+      if (key.delete) {
+        if (word) {
+          erase(position, wordEnd(values, position))
+        } else {
+          erase(position, Math.min(max, position + 1))
+        }
         return
       }
 
@@ -170,28 +183,23 @@ export function InputBox({
         // Readline-style editing: escape no longer throws the draft away, so
         // these are the way to clear or chop a line.
         if (input === 'u') {
-          onChange('', 0)
+          erase(lineStart(values, position), position)
           return
         }
         if (input === 'k') {
-          onChange(values.slice(0, position).join(''), position)
+          erase(position, lineEnd(values, position))
           return
         }
         if (input === 'w') {
-          const before = values.slice(0, position)
-          let cut = before.length
-          while (cut > 0 && /\s/.test(before[cut - 1]!)) cut--
-          while (cut > 0 && !/\s/.test(before[cut - 1]!)) cut--
-          const next = [...before.slice(0, cut), ...values.slice(position)].join('')
-          onChange(next, cut)
+          erase(wordStart(values, position), position)
           return
         }
         if (input === 'a') {
-          onChange(value, 0)
+          onChange(value, lineStart(values, position))
           return
         }
         if (input === 'e') {
-          onChange(value, max)
+          onChange(value, lineEnd(values, position))
           return
         }
         return
@@ -202,6 +210,17 @@ export function InputBox({
         const cleaned = input.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
         if (cleaned) insert(cleaned)
       }
+    },
+    { isActive: !disabled },
+  )
+
+  // Bracketed paste keeps a multi-line paste as one atomic edit instead of
+  // feeding its newlines to the key handler, which would submit the message.
+  usePaste(
+    (text) => {
+      if (disabled) return
+      const cleaned = text.replace(/\r\n?/g, '\n')
+      if (cleaned) insert(cleaned)
     },
     { isActive: !disabled },
   )

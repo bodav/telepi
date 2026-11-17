@@ -19,6 +19,7 @@ import { desktopNotify, ringBell } from '../core/notify.js'
 import { openPath } from '../core/open.js'
 import { onResizeReset } from '../core/resize-events.js'
 import { parsePeerRef } from '../core/peer-ref.js'
+import { loadState, pendingState, rememberState, saveState, type ChatState } from '../core/state.js'
 import { displayWidth, graphemes, rankByFuzzy, truncate } from '../core/text.js'
 import { formatBytes, formatClock } from '../core/time.js'
 import type { ChatEventView, MessageView } from '../telegram/message.js'
@@ -44,6 +45,7 @@ import { Overlay, type OverlayState } from './Overlay.js'
 import { Spinner } from './Spinner.js'
 import type { Theme } from './theme.js'
 import { toneColor } from './theme.js'
+import { useTerminalTitle } from './use-terminal-title.js'
 
 type ConnectionState = 'offline' | 'connecting' | 'updating' | 'connected'
 
@@ -118,6 +120,8 @@ export function ChatScreen({
 
   const themeRef = useRef(theme)
   themeRef.current = theme
+  const inputRef = useRef('')
+  inputRef.current = input
   /** Rows of `<Static>` output written since the last viewport reset. */
   const committedRowsRef = useRef(0)
 
@@ -142,20 +146,122 @@ export function ChatScreen({
   const feedRef = useRef<FeedEntry[]>([])
   /** Unsent text per chat, so switching chats never eats a half-written message. */
   const drafts = useRef(new Map<number, string>())
-  const inputRef = useRef('')
   const markdownRef = useRef(config.markdown)
   /** Muted dialogs: no bell and no desktop notification for those chats. */
   const muted = useRef(new Map<number, boolean>())
   const dialogLimit = useRef(DIALOG_LIMIT)
   const overlayRef = useRef<OverlayState | null>(null)
+  const sentHistoryRef = useRef<string[]>([])
+  const saveTimer = useRef<NodeJS.Timeout | null>(null)
+  /** True once the previous session's state has been read from disk. */
+  const stateLoaded = useRef(false)
+
+  /** Snapshot the drafts and history into a plain object. */
+  const snapshotState = useCallback((): ChatState => {
+    const current = chatRef.current
+    if (current) {
+      if (inputRef.current) drafts.current.set(current.id, inputRef.current)
+      else drafts.current.delete(current.id)
+    }
+
+    const saved: Record<string, string> = {}
+    for (const [id, text] of drafts.current) {
+      if (text) saved[String(id)] = text
+    }
+
+    return { drafts: saved, history: sentHistoryRef.current }
+  }, [])
+
+  /** Snapshot the drafts and history, then write them to disk. */
+  const flushState = useCallback((): Promise<void> => {
+    const state = snapshotState()
+    rememberState(state)
+    // Never overwrite the saved file with an empty snapshot before the load
+    // finished, or a quick quit would wipe the previous session's drafts.
+    if (!stateLoaded.current) return Promise.resolve()
+    return saveState(state).catch(() => {})
+  }, [snapshotState])
+
+  /** Debounced save: typing writes at most once a second. */
+  const scheduleStateSave = useCallback((): void => {
+    if (saveTimer.current) return
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      void flushState()
+    }, 1000)
+  }, [flushState])
+
+  // Restore drafts and sent history from the previous session.
+  useEffect(() => {
+    let cancelled = false
+
+    void loadState().then((state) => {
+      if (cancelled) return
+
+      for (const [id, text] of Object.entries(state.drafts)) {
+        const chatId = Number(id)
+        if (Number.isInteger(chatId) && text && !drafts.current.has(chatId)) {
+          drafts.current.set(chatId, text)
+        }
+      }
+
+      // Do not clobber history typed before the read finished.
+      if (sentHistoryRef.current.length === 0) {
+        sentHistoryRef.current = state.history
+        setSentHistory(state.history)
+      }
+
+      // Seed the exit handler so a quick quit cannot wipe the saved state.
+      // Keep anything typed while the read was in flight.
+      const early = pendingState()
+      rememberState({
+        drafts: { ...state.drafts, ...early.drafts },
+        history: state.history,
+      })
+
+      // The loaded state is now in memory, so debounced saves may overwrite it.
+      stateLoaded.current = true
+
+      // The boot effect may already have opened a chat before the read finished.
+      const current = chatRef.current
+      if (current && !inputRef.current) {
+        const draft = drafts.current.get(current.id)
+        if (draft) {
+          setInput(draft)
+          setCursor(graphemes(draft).length)
+        }
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    sentHistoryRef.current = sentHistory
+  }, [sentHistory])
+
+  // Keep the exit handler's snapshot fresh and debounce writes to disk.
+  useEffect(() => {
+    if (!stateLoaded.current) return
+    rememberState(snapshotState())
+    scheduleStateSave()
+  }, [input, sentHistory, scheduleStateSave, snapshotState])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+      void flushState()
+    }
+  }, [flushState])
 
   useEffect(() => {
     overlayRef.current = overlay
   }, [overlay])
-
-  useEffect(() => {
-    inputRef.current = input
-  }, [input])
 
   useEffect(() => {
     markdownRef.current = config.markdown
@@ -446,7 +552,10 @@ export function ChatScreen({
 
         // Remember what was being typed, and restore this chat's own draft.
         const previous = chatRef.current
-        if (previous && inputRef.current) drafts.current.set(previous.id, inputRef.current)
+        if (previous) {
+          if (inputRef.current) drafts.current.set(previous.id, inputRef.current)
+          else drafts.current.delete(previous.id)
+        }
 
         chatRef.current = info
         setChat(info)
@@ -527,6 +636,7 @@ export function ChatScreen({
   const closeChat = useCallback(() => {
     const current = chatRef.current
     if (current && inputRef.current) drafts.current.set(current.id, inputRef.current)
+    else if (current) drafts.current.delete(current.id)
 
     chatRef.current = null
     setChat(null)
@@ -1476,6 +1586,19 @@ export function ChatScreen({
   }, [config.lastChat, initialChat, openChat, openOverlay])
 
   const unreadTotal = Object.values(unread).reduce((sum, value) => sum + value, 0)
+
+  // Show the current chat and unread count in the terminal window title, so a
+  // background terminal still tells you what is going on.
+  const windowTitle = truncate(
+    chat
+      ? `telepi · ${chat.title}${unreadTotal > 0 ? ` · ${unreadTotal} unread` : ''}`
+      : unreadTotal > 0
+        ? `telepi · ${unreadTotal} unread`
+        : 'telepi',
+    60,
+  )
+  useTerminalTitle(windowTitle)
+
   const overlayInput =
     overlay && (overlay.kind === 'chats' || overlay.kind === 'help') ? overlay : null
   const showHistoryOverlay = overlay?.kind === 'history'

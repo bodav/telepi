@@ -50,6 +50,9 @@ Claude Code, Copilot CLI or pi.
 - **Know who is talking** — every message carries a coloured bar in the left
   gutter; your own messages get a heavier bar, and the prompt stays pinned to
   the bottom of the window when you resize it.
+- **Drafts that survive** — unsent text and the `↑` recall list are saved to
+  disk, so quitting or crashing never loses a half-written message. The
+  terminal title shows the open chat and unread count.
 - **Slash command palette** — fuzzy autocomplete above the prompt, `/help`
   overlay, `/older` pager for history that has scrolled away.
 - **Telegram formatting** — bold, italic, underline, strike, spoiler, inline
@@ -238,8 +241,9 @@ A message keeps its indentation either way.
 instead of resolving to a bogus chat). A link that points at a message opens
 the chat and jumps to that message.
 
-A message that fails to send stays in the input box, and switching chats keeps
-each chat's draft until you come back to it.
+A message that fails to send stays in the input box. Each chat keeps its own
+draft, and drafts plus the `↑` recall list are saved under
+`~/.config/telepi/state.json`, so they survive a restart.
 
 ## Keys
 
@@ -247,7 +251,10 @@ each chat's draft until you come back to it.
 | --- | --- |
 | `enter` | send / run command |
 | `alt+enter` or `\` + `enter` | newline |
-| `↑` / `↓` | input history (or move through menus) |
+| `↑` / `↓` | input history, or move between lines in a multiline draft |
+| `←` / `→` | move one character (hold `ctrl`/`alt` for one word) |
+| `home` / `end` | start / end of the current line |
+| `backspace` / `delete` | delete one character (hold `ctrl`/`alt` for one word) |
 | `tab` | complete a command / move between credential fields |
 | `esc` | close overlay, clear reply |
 | `ctrl+n` | more search hits / more chats in the picker |
@@ -256,11 +263,17 @@ each chat's draft until you come back to it.
 | `ctrl+l` | repaint |
 | `ctrl+c` | quit |
 
+Pasting multi-line text inserts it as a single edit instead of sending each
+line. `/copy` uses the native clipboard tool when one exists and falls back to
+the terminal's OSC 52 clipboard, which also works over SSH and in containers;
+set `TELEPI_CLIPBOARD=osc52` to force the fallback.
+
 ## Configuration
 
 | Path | Purpose |
 | --- | --- |
 | `~/.config/telepi/config.json` | credentials, last chat, theme, notifications (`0600`) |
+| `~/.config/telepi/state.json` | drafts and input history (`0600`) |
 | `~/.config/telepi/session/` | MTProto session, SQLite (`0700`) |
 | `~/.config/telepi/downloads/` | `/save` destination |
 
@@ -288,7 +301,7 @@ telepi --version
 ```
 src/
   cli.tsx               argument parsing, Ink bootstrap, teardown
-  core/                 config, text/width, time, entities, clipboard, notify
+  core/                 config, state, title, text/width, time, entities, clipboard, notify
   telegram/             client, QR/phone auth, peers, messages, media, search
   chat/                 feed builder (day dividers, sender grouping)
   commands/             declarative registry + implementations

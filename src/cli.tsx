@@ -3,6 +3,8 @@ import { VERSION } from './core/constants.js'
 import { LOGO_LINES } from './core/logo.js'
 import { resizeEvents } from './core/resize-events.js'
 import { installResizeReflowFix } from './core/resize-reflow.js'
+import { installStateExitHandler } from './core/state.js'
+import { installTerminalTitle } from './core/title.js'
 
 interface Args {
   chat?: string
@@ -122,11 +124,15 @@ async function main(): Promise<void> {
     rerender: () => resizeEvents.emit('reset'),
   })
 
+  const restoreTitle = installTerminalTitle(`telepi ${VERSION}`)
+  installStateExitHandler()
+
   try {
     instance = render(app, { exitOnCtrlC: true })
 
     await instance.waitUntilExit()
   } finally {
+    restoreTitle()
     uninstallReflowFix()
     if (runtime.client) await runtime.client.destroy().catch(() => {})
   }
